@@ -1,0 +1,9 @@
+---
+url: http://localhost:9090/
+aws-region: eu-central-1
+namespace: TestNamespace
+metrics:
+  - up
+  - go_memstats_alloc_bytes_total
+  - go_goroutines
+  - go_memstats_last_gc_time_seconds

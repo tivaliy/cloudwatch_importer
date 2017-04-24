@@ -16,14 +16,16 @@
 import json
 import requests
 
+from six.moves.urllib import parse as urlparse
+
 
 class APIClient(object):
     """This class handles API requests."""
 
-    def __init__(self, url, api_path="/api/v1/"):
+    def __init__(self, url):
         self.root = "{url}".format(url=url)
         self._session = None
-        self.api_root = "{0}{1}".format(self.root, api_path)
+        self.api_root = urlparse.urljoin(self.root, "/api/v1/")
 
     @staticmethod
     def _make_common_headers():

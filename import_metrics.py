@@ -20,7 +20,7 @@ import os
 import boto3
 
 import client
-import utils
+import validator
 
 
 def config_file(file_path):
@@ -35,9 +35,12 @@ def get_settings(file_path):
 
     :param file_path: path to configuration file
     :type file_path: str
+    :return: data settings from configuration file
+    :rtype: dict
     """
 
-    return utils.read_from_file(file_path)
+    return validator.validate_file_by_schema(validator.CONFIG_SCHEMA,
+                                             file_path)
 
 
 def get_metrics_data(client_api, metrics):

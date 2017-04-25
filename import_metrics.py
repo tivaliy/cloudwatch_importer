@@ -21,6 +21,7 @@ import boto3
 
 import client
 import validator
+import utils
 
 
 def config_file(file_path):
@@ -132,6 +133,15 @@ def main():
                         required=True,
                         type=config_file,
                         help='Configuration file.')
+    parser.add_argument('-d',
+                        '--dump',
+                        choices=['prometheus', 'cloudwatch'],
+                        help='Dump metrics to file and exit.')
+    parser.add_argument('-f',
+                        '--format',
+                        choices=utils.SUPPORTED_FILE_FORMATS,
+                        default='json',
+                        help='Format of metrics file dump. Defaults to json.')
     args = parser.parse_args()
     settings = get_settings(args.config)
     url = settings.get('url')
@@ -143,6 +153,11 @@ def main():
     client_api = client.APIClient(url=url)
     metrics_data = get_metrics_data(client_api, metrics)
     cw_metrics_data = prepare_metrics(metrics_data)
+    dump_type = {'prometheus': metrics_data, 'cloudwatch': cw_metrics_data}
+    if args.dump:
+        utils.write_to_file("{0}.{1}".format(args.dump, args.format),
+                            dump_type[args.dump])
+        exit()
 
     cw_client = boto3.client('cloudwatch', region_name=aws_region)
     cw_client.put_metric_data(Namespace=namespace, MetricData=cw_metrics_data)

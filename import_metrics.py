@@ -125,6 +125,13 @@ def prepare_metrics(data):
     return metrics
 
 
+def chunks(data, n):
+    """Yield successive n-sized chunks from metrics data list."""
+
+    for i in range(0, len(data), n):
+        yield data[i:i + n]
+
+
 def main():
     parser = argparse.ArgumentParser(description='CloudWatch metrics importer')
     parser.add_argument('-c',
@@ -160,7 +167,10 @@ def main():
         exit()
 
     cw_client = boto3.client('cloudwatch', region_name=aws_region)
-    cw_client.put_metric_data(Namespace=namespace, MetricData=cw_metrics_data)
+    # Split imported metrics list in chunks,
+    # since only 20/PutMetricData per request is allowed
+    for chunk in chunks(cw_metrics_data, 20):
+        cw_client.put_metric_data(Namespace=namespace, MetricData=chunk)
 
 
 if __name__ == "__main__":

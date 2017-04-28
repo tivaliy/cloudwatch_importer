@@ -15,20 +15,26 @@
 #    under the License.
 
 import argparse
-import os
+import logging
+import logging.handlers
+import sys
 
 import boto3
+import requests
+
+from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError
 
 import client
 import validator
 import utils
 
-
-def config_file(file_path):
-    if not os.path.lexists(file_path):
-        raise argparse.ArgumentTypeError(
-            "File '{0}' does not exist".format(file_path))
-    return file_path
+DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+CONSOLE_LOG_FORMAT = '%(levelname)s: %(message)s'
+FILE_LOG_FORMAT = ('%(asctime)s.%(msecs)03d %(levelname)s '
+                   '(%(module)s) %(message)s')
+LOG_FILE_SIZE = 10485760  #  10MB
+ROTATE_LOG_FILE_COUNT = 5
 
 
 def get_settings(file_path):
@@ -40,8 +46,13 @@ def get_settings(file_path):
     :rtype: dict
     """
 
-    return validator.validate_file_by_schema(validator.CONFIG_SCHEMA,
-                                             file_path)
+    try:
+        data = validator.validate_file_by_schema(validator.CONFIG_SCHEMA,
+                                                 file_path)
+    except (ValueError, OSError, IOError) as e:
+        logging.error("Received error: {}".format(e), exc_info=True)
+        raise
+    return data
 
 
 def get_metrics_data(client_api, metrics):
@@ -55,14 +66,23 @@ def get_metrics_data(client_api, metrics):
     :rtype: list[dict]
     """
 
+    logging.info("Start fetching metrics from Prometheus.")
     metrics_data_list = []
     for metric in metrics:
         params = {'query': metric}
-        data = client_api.get_request('query', params)
+        try:
+            data = client_api.get_request('query', params)
+        except requests.exceptions.RequestException as e:
+            logging.error("Received error: {}".format(e), exc_info=True)
+            raise
         # Prometheus returns false-positive result for non-existent metrics.
-        # We have to reject non-existent metrics, i.e. those with empty data
-        if data['data']['result']:
-            metrics_data_list.append(data)
+        # We have to skip non-existent metrics, i.e. those with empty data
+        if not data['data']['result']:
+            logging.warning("Metric '{0}' not found.".format(metric))
+            continue
+        metrics_data_list.append(data)
+    logging.info("{0} out of {1} metrics were successfully fetched from "
+                 "Prometheus.".format(len(metrics_data_list), len(metrics)))
     return metrics_data_list
 
 
@@ -111,6 +131,7 @@ def prepare_metrics(data):
     :rtype: list[dict]
     """
 
+    logging.info("Start converting metrics to CloudWatch format.")
     metrics = []
     for item in data:
         for i in item['data']['result']:
@@ -122,6 +143,8 @@ def prepare_metrics(data):
                 unit='Count'
             )
             metrics.append(single_metric_data)
+    logging.info("{0} metrics are ready to be pushed to "
+                 "CloudWatch.".format(len(metrics)))
     return metrics
 
 
@@ -132,13 +155,27 @@ def chunks(data, n):
         yield data[i:i + n]
 
 
+def configure_logging(level=logging.INFO, file_path=None):
+    logging.basicConfig(level=level, format=CONSOLE_LOG_FORMAT)
+
+    if file_path:
+        fh = logging.handlers.RotatingFileHandler(
+            filename=file_path,
+            maxBytes=LOG_FILE_SIZE,
+            backupCount=ROTATE_LOG_FILE_COUNT
+        )
+        fh.setLevel(level=level)
+        formatter = logging.Formatter(fmt=FILE_LOG_FORMAT, datefmt=DATE_FORMAT)
+        fh.setFormatter(formatter)
+        logging.getLogger('').addHandler(fh)
+
+
 def main():
     parser = argparse.ArgumentParser(description='CloudWatch metrics importer')
     parser.add_argument('-c',
                         '--config',
                         metavar='CONFIG_FILE',
                         required=True,
-                        type=config_file,
                         help='Configuration file.')
     parser.add_argument('-d',
                         '--dump',
@@ -149,7 +186,20 @@ def main():
                         choices=utils.SUPPORTED_FILE_FORMATS,
                         default='json',
                         help='Format of metrics file dump. Defaults to json.')
+    parser.add_argument('-v',
+                        '--verbose',
+                        action='store_true',
+                        help='Increase output verbosity.')
+    parser.add_argument('--log-file',
+                        help='Log file to store logs.')
     args = parser.parse_args()
+
+    level = logging.DEBUG if args.verbose else logging.INFO
+    log_file = args.log_file if args.log_file else None
+    configure_logging(level=level, file_path=log_file)
+
+    logging.info("Start reading configuration from "
+                 "file '{0}'.".format(args.config))
     settings = get_settings(args.config)
     url = settings.get('url')
     metrics = settings.get('metrics')
@@ -162,15 +212,22 @@ def main():
     cw_metrics_data = prepare_metrics(metrics_data)
     dump_type = {'prometheus': metrics_data, 'cloudwatch': cw_metrics_data}
     if args.dump:
-        utils.write_to_file("{0}.{1}".format(args.dump, args.format),
-                            dump_type[args.dump])
-        exit()
+        file_name = "{0}.{1}".format(args.dump, args.format)
+        utils.write_to_file(file_name, dump_type[args.dump])
+        logging.info("Dump file '{0}' successfully created".format(file_name))
+        sys.exit()
 
-    cw_client = boto3.client('cloudwatch', region_name=aws_region)
-    # Split imported metrics list in chunks,
-    # since only 20/PutMetricData per request is allowed
-    for chunk in chunks(cw_metrics_data, 20):
-        cw_client.put_metric_data(Namespace=namespace, MetricData=chunk)
+    logging.info("Start pushing metrics to CloudWatch.")
+    try:
+        cw_client = boto3.client('cloudwatch', region_name=aws_region)
+        # Split imported metrics list in chunks,
+        # since only 20/PutMetricData per request is allowed
+        for chunk in chunks(cw_metrics_data, 20):
+            cw_client.put_metric_data(Namespace=namespace, MetricData=chunk)
+    except (BotoCoreError, ClientError) as e:
+        logging.error("Received error: {}".format(e), exc_info=True)
+        raise
+    logging.info("Metrics were successfully pushed to CloudWatch.")
 
 
 if __name__ == "__main__":

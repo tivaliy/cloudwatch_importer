@@ -26,7 +26,8 @@ def safe_load(data_format, stream):
                'yaml': yaml.safe_load}
 
     if data_format not in loaders:
-        raise ValueError('Unsupported data format.')
+        raise ValueError('Unsupported data format. '
+                         'Only {} are allowed'.format(SUPPORTED_FILE_FORMATS))
 
     loader = loaders[data_format]
     return loader(stream)
@@ -41,7 +42,8 @@ def safe_dump(data_format, stream, data):
                'yaml': yaml_dumper}
 
     if data_format not in dumpers:
-        raise ValueError('Unsupported data format.')
+        raise ValueError('Unsupported data format. '
+                         'Only {} are allowed.'.format(SUPPORTED_FILE_FORMATS))
 
     dumper = dumpers[data_format]
     dumper(data, stream)
@@ -55,10 +57,5 @@ def read_from_file(file_path):
 
 def write_to_file(file_path, data):
     data_format = os.path.splitext(file_path)[1].lstrip('.')
-
-    if data_format not in SUPPORTED_FILE_FORMATS:
-        raise ValueError('Unsupported data format. Supported file formats: '
-                         '{formats}'.format(formats=SUPPORTED_FILE_FORMATS))
-
     with open(file_path, 'w') as stream:
         safe_dump(data_format, stream, data)

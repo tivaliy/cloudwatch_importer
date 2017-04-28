@@ -13,11 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import logging
+
 import jsonschema
 import six
 
 import utils
 
+logger = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = {
         "$schema": "http://json-schema.org/draft-04/schema#",
@@ -47,16 +50,18 @@ def validate_schema(data, schema, file_path, value_path=None):
     try:
         jsonschema.validate(data, schema)
     except jsonschema.exceptions.ValidationError as exc:
-        print(_make_error_message(exc, file_path, value_path))
+        logger.error(_make_error_message(exc, file_path, value_path),
+                     exc_info=True)
         raise
 
 
 def validate_file_by_schema(schema, file_path):
+    logger.debug("Start schema validation for '{0}' file with schema: "
+                 "{1}".format(file_path, schema))
     data = utils.read_from_file(file_path)
-    if data is not None:
-        validate_schema(data, schema, file_path)
-    else:
-        raise ValueError('File {0} is empty'.format(file_path))
+    if data is None:
+        raise ValueError("File '{0}' is empty".format(file_path))
+    validate_schema(data, schema, file_path)
     return data
 
 

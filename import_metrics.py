@@ -58,7 +58,7 @@ def get_metrics_data(client_api, metrics):
     metrics_data_list = []
     for metric in metrics:
         params = {'query': metric}
-        data = client_api.get_request('/query', params)
+        data = client_api.get_request('query', params)
         # Prometheus returns false-positive result for non-existent metrics.
         # We have to reject non-existent metrics, i.e. those with empty data
         if data['data']['result']:
